@@ -21,6 +21,7 @@ define('WP_GPT_CHATBOT_PATH', plugin_dir_path(__FILE__));
 define('WP_GPT_CHATBOT_URL', plugin_dir_url(__FILE__));
 
 // Include necessary files
+require_once WP_GPT_CHATBOT_PATH . 'includes/class-database-manager.php';
 require_once WP_GPT_CHATBOT_PATH . 'includes/admin/class-admin-settings.php';
 require_once WP_GPT_CHATBOT_PATH . 'includes/api/class-chatgpt-api.php';
 require_once WP_GPT_CHATBOT_PATH . 'includes/frontend/class-chatbot-widget.php';
@@ -34,14 +35,19 @@ function wp_gpt_chatbot_activate() {
             'api_key' => '',
             'model' => 'gpt-3.5-turbo',
             'training_prompt' => 'You are a helpful assistant for our website.',
+            'unknown_response' => 'I don\'t have enough information to answer that question yet. Your question has been logged and our team will provide an answer soon.',
             'primary_color' => '#007bff',
             'secondary_color' => '#ffffff',
             'bot_name' => 'GPT Assistant',
             'position' => 'bottom-right',
-            'welcome_message' => 'Hello! How can I help you today?'
+            'welcome_message' => 'Hello! How can I help you today?',
+            'training_data' => array()
         );
         update_option('wp_gpt_chatbot_settings', $default_settings);
     }
+    
+    // Create database tables
+    WP_GPT_Chatbot_Database_Manager::create_tables();
 }
 
 // Initialize the plugin
@@ -56,8 +62,32 @@ function wp_gpt_chatbot_init() {
     // Initialize frontend widget
     $chatbot_widget = new WP_GPT_Chatbot_Widget($chatgpt_api);
     $chatbot_widget->init();
+    
+    // Register the Unknown Questions admin page
+    add_action('admin_menu', 'wp_gpt_chatbot_add_questions_page');
 }
 add_action('plugins_loaded', 'wp_gpt_chatbot_init');
+
+/**
+ * Add the Unknown Questions admin page
+ */
+function wp_gpt_chatbot_add_questions_page() {
+    add_submenu_page(
+        'wp-gpt-chatbot',
+        __('Unknown Questions', 'wp-gpt-chatbot'),
+        __('Unknown Questions', 'wp-gpt-chatbot'),
+        'manage_options',
+        'wp-gpt-chatbot-questions',
+        'wp_gpt_chatbot_display_questions_page'
+    );
+}
+
+/**
+ * Display the Unknown Questions admin page
+ */
+function wp_gpt_chatbot_display_questions_page() {
+    include WP_GPT_CHATBOT_PATH . 'includes/admin/views/unknown-questions.php';
+}
 
 // Enqueue frontend scripts and styles
 function wp_gpt_chatbot_enqueue_scripts() {

@@ -33,17 +33,58 @@ class WP_GPT_Chatbot_Admin_Settings {
     }
     
     public function validate_settings($input) {
-        // Sanitize each setting
-        $input['api_key'] = sanitize_text_field($input['api_key']);
-        $input['model'] = sanitize_text_field($input['model']);
-        $input['training_prompt'] = sanitize_textarea_field($input['training_prompt']);
-        $input['primary_color'] = sanitize_hex_color($input['primary_color']);
-        $input['secondary_color'] = sanitize_hex_color($input['secondary_color']);
-        $input['bot_name'] = sanitize_text_field($input['bot_name']);
-        $input['position'] = sanitize_text_field($input['position']);
-        $input['welcome_message'] = sanitize_text_field($input['welcome_message']);
+        global $wpdb;
         
-        return $input;
+        // Get current settings to preserve training_data - bypass cache by getting directly from database
+        $option_name = 'wp_gpt_chatbot_settings';
+        $row = $wpdb->get_row($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", $option_name));
+        $current_settings = $row ? maybe_unserialize($row->option_value) : array();
+        
+        if (!is_array($current_settings)) {
+            $current_settings = array();
+        }
+        
+        // Sanitize each setting
+        $output = array();
+        $output['api_key'] = isset($input['api_key']) ? sanitize_text_field($input['api_key']) : '';
+        $output['model'] = isset($input['model']) ? sanitize_text_field($input['model']) : 'gpt-3.5-turbo';
+        $output['training_prompt'] = isset($input['training_prompt']) ? sanitize_textarea_field($input['training_prompt']) : '';
+        $output['unknown_response'] = isset($input['unknown_response']) ? sanitize_textarea_field($input['unknown_response']) : '';
+        $output['primary_color'] = isset($input['primary_color']) ? sanitize_hex_color($input['primary_color']) : '#007bff';
+        $output['secondary_color'] = isset($input['secondary_color']) ? sanitize_hex_color($input['secondary_color']) : '#ffffff';
+        $output['bot_name'] = isset($input['bot_name']) ? sanitize_text_field($input['bot_name']) : '';
+        $output['position'] = isset($input['position']) ? sanitize_text_field($input['position']) : 'bottom-right';
+        $output['welcome_message'] = isset($input['welcome_message']) ? sanitize_text_field($input['welcome_message']) : '';
+        
+        // Merge new training_data from settings form (if present) with latest from DB
+        $db_training_data = (isset($current_settings['training_data']) && is_array($current_settings['training_data']))
+            ? $current_settings['training_data'] : array();
+        $input_training_data = (isset($input['training_data']) && is_array($input['training_data']))
+            ? $input['training_data'] : array();
+
+        // Merge: DB data comes first, then any new/updated entries from form (avoid duplicates)
+        $merged_training_data = $db_training_data;
+        foreach ($input_training_data as $item) {
+            // Only add if not already present (by question/answer)
+            $exists = false;
+            foreach ($db_training_data as $existing) {
+                if (
+                    trim($existing['question']) === trim($item['question']) &&
+                    trim($existing['answer']) === trim($item['answer'])
+                ) {
+                    $exists = true;
+                    break;
+                }
+            }
+            if (!$exists && !empty($item['question']) && !empty($item['answer'])) {
+                $merged_training_data[] = $item;
+            }
+        }
+        // Debug output
+        error_log('GPT Chatbot validate_settings - merged training_data: ' . print_r($merged_training_data, true));
+        $output['training_data'] = $merged_training_data;
+        
+        return $output;
     }
     
     public function display_settings_page() {
