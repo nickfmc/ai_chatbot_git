@@ -190,7 +190,7 @@ if (isset($_POST['import_training']) && isset($_FILES['training_csv'])) {
                     </th>
                     <td>
                         <textarea id="wp_gpt_chatbot_settings[training_prompt]" name="wp_gpt_chatbot_settings[training_prompt]" rows="5" class="large-text"><?php echo esc_textarea($settings['training_prompt']); ?></textarea>
-                        <p class="description"><?php echo esc_html__('Enter your base system prompt. This sets the overall behavior and tone of your chatbot.', 'wp-gpt-chatbot'); ?></p>
+                        <p class="description"><?php echo esc_html__('Enter your base system prompt. This sets the overall behavior and tone of your chatbot. The system will automatically handle "you" references in user questions by replacing them with your company name for better context.', 'wp-gpt-chatbot'); ?></p>
                     </td>
                 </tr>
                 <tr>
@@ -212,6 +212,7 @@ if (isset($_POST['import_training']) && isset($_FILES['training_csv'])) {
                     </th>
                     <td>
                         <input type="text" id="wp_gpt_chatbot_settings[bot_name]" name="wp_gpt_chatbot_settings[bot_name]" value="<?php echo esc_attr($settings['bot_name']); ?>" class="regular-text">
+                        <p class="description"><?php echo esc_html__('Enter your company or organization name. When users ask questions using "you" (like "what do you do?"), the chatbot will automatically interpret this as referring to your company name for more accurate responses.', 'wp-gpt-chatbot'); ?></p>
                     </td>
                 </tr>
                 <tr>

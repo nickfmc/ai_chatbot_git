@@ -19,6 +19,7 @@ class WP_GPT_Chatbot_API {
     private $training_prompt;
     private $training_data;
     private $unknown_response;
+    private $bot_name;
     
     public function __construct() {
         $settings = get_option('wp_gpt_chatbot_settings');
@@ -27,6 +28,7 @@ class WP_GPT_Chatbot_API {
         $this->training_prompt = $settings['training_prompt'];
         $this->training_data = isset($settings['training_data']) ? $settings['training_data'] : array();
         $this->unknown_response = isset($settings['unknown_response']) ? $settings['unknown_response'] : 'I don\'t have enough information to answer that question yet. Your question has been logged and our team will provide an answer soon.';
+        $this->bot_name = isset($settings['bot_name']) ? $settings['bot_name'] : '';
         
         // Add AJAX handlers
         add_action('wp_ajax_wp_gpt_chatbot_send_message', array($this, 'handle_chat_request'));
@@ -74,6 +76,75 @@ class WP_GPT_Chatbot_API {
     }
     
     /**
+     * Preprocess user message to replace "you" references with company name
+     * 
+     * @param string $message The user's original message
+     * @return string The processed message with "you" references replaced
+     */
+    private function preprocess_user_message($message) {
+        // Skip processing if no company name is set
+        if (empty($this->bot_name)) {
+            return $message;
+        }
+        
+        // Define patterns to match "you" references in different contexts
+        $patterns = array(
+            // "What do you do?" -> "What does [Company] do?"
+            '/\bwhat do you do\b/i' => 'what does ' . $this->bot_name . ' do',
+            '/\bwhat are you doing\b/i' => 'what is ' . $this->bot_name . ' doing',
+            '/\bwhat can you do\b/i' => 'what can ' . $this->bot_name . ' do',
+            
+            // "Who are you?" -> "Who is [Company]?"
+            '/\bwho are you\b/i' => 'who is ' . $this->bot_name,
+            '/\bwho is you\b/i' => 'who is ' . $this->bot_name,
+            
+            // "Do you have/offer/provide..." -> "Does [Company] have/offer/provide..."
+            '/\bdo you (have|offer|provide|sell|make|create|support|handle|deal|work)\b/i' => 'does ' . $this->bot_name . ' $1',
+            '/\bdo you (specialize|focus)\b/i' => 'does ' . $this->bot_name . ' $1',
+            
+            // "Can you..." -> "Can [Company]..."
+            '/\bcan you (help|assist|provide|offer|do|handle|support|work)\b/i' => 'can ' . $this->bot_name . ' $1',
+            
+            // "Are you..." -> "Is [Company]..."
+            '/\bare you (available|open|closed|located|based|able|willing)\b/i' => 'is ' . $this->bot_name . ' $1',
+            '/\bare you a (company|business|service|organization)\b/i' => 'is ' . $this->bot_name . ' a $1',
+            
+            // "How do you..." -> "How does [Company]..."
+            '/\bhow do you (work|operate|function|handle|process|deal|manage)\b/i' => 'how does ' . $this->bot_name . ' $1',
+            
+            // "Where are you..." -> "Where is [Company]..."
+            '/\bwhere are you (located|based|situated)\b/i' => 'where is ' . $this->bot_name . ' $1',
+            
+            // "When do you..." -> "When does [Company]..."
+            '/\bwhen do you (open|close|operate|work)\b/i' => 'when does ' . $this->bot_name . ' $1',
+            '/\bwhen are you (open|closed|available)\b/i' => 'when is ' . $this->bot_name . ' $1',
+            
+            // "Why do you..." -> "Why does [Company]..."
+            '/\bwhy do you (do|offer|provide|specialize|focus)\b/i' => 'why does ' . $this->bot_name . ' $1',
+            
+            // General patterns for common business questions
+            '/\byour (services|products|company|business|team|staff|hours|prices|pricing|location|address|phone|email)\b/i' => $this->bot_name . '\'s $1',
+            '/\byour (website|site)\b/i' => $this->bot_name . '\'s $1',
+            
+            // Questions about clients/customers
+            '/\bwhat clients do you (represent|serve|work with|have)\b/i' => 'what clients does ' . $this->bot_name . ' $1',
+            '/\bwho do you (serve|help|work with|represent)\b/i' => 'who does ' . $this->bot_name . ' $1',
+            
+            // Questions about experience/history
+            '/\bhow long have you been\b/i' => 'how long has ' . $this->bot_name . ' been',
+            '/\bwhen did you (start|begin|establish|found)\b/i' => 'when did ' . $this->bot_name . ' $1',
+        );
+        
+        // Apply the replacements
+        $processed_message = $message;
+        foreach ($patterns as $pattern => $replacement) {
+            $processed_message = preg_replace($pattern, $replacement, $processed_message);
+        }
+        
+        return $processed_message;
+    }
+    
+    /**
      * Determine if the question should be classified as unknown
      * This uses a second API call to evaluate confidence
      * 
@@ -85,6 +156,9 @@ class WP_GPT_Chatbot_API {
         if (empty($this->training_data)) {
             return true;
         }
+        
+        // Preprocess the question to replace "you" with company name
+        $processed_question = $this->preprocess_user_message($question);
         
         $url = 'https://api.openai.com/v1/chat/completions';
         
@@ -102,7 +176,7 @@ class WP_GPT_Chatbot_API {
             ),
             array(
                 'role' => 'user',
-                'content' => "Can I confidently answer this question based on my training data: {$question}"
+                'content' => "Can I confidently answer this question based on my training data: {$processed_question}"
             )
         );
         
@@ -151,11 +225,14 @@ class WP_GPT_Chatbot_API {
      * @return string The response from ChatGPT or unknown question message
      */
     private function send_to_chatgpt($message, $conversation_history) {
-        // First check if this is an unknown question
-        $is_unknown = $this->is_unknown_question($message);
+        // Preprocess the message to replace "you" with company name
+        $processed_message = $this->preprocess_user_message($message);
+        
+        // First check if this is an unknown question (using processed message)
+        $is_unknown = $this->is_unknown_question($processed_message);
         
         if ($is_unknown) {
-            // Log the unknown question to the database
+            // Log the original question to the database
             WP_GPT_Chatbot_Database_Manager::log_unknown_question($message);
             
             // Return the unknown question response
@@ -168,6 +245,13 @@ class WP_GPT_Chatbot_API {
         // Generate the full system prompt including training data
         $full_prompt = $this->training_prompt . $this->generate_training_content();
         
+        // If company name is set, add instruction about handling "you" references
+        if (!empty($this->bot_name)) {
+            $full_prompt .= "\n\nIMPORTANT: When users refer to 'you' in their questions, they are asking about " . $this->bot_name . ". ";
+            $full_prompt .= "For example, 'What do you do?' means 'What does " . $this->bot_name . " do?'. ";
+            $full_prompt .= "Always respond as if you are representing " . $this->bot_name . ".";
+        }
+        
         // Prepare the conversation messages
         $messages = array(
             array(
@@ -176,18 +260,27 @@ class WP_GPT_Chatbot_API {
             )
         );
         
-        // Add conversation history
+        // Add conversation history (preprocess user messages in history)
         foreach ($conversation_history as $entry) {
-            $messages[] = array(
-                'role' => $entry['role'],
-                'content' => $entry['content']
-            );
+            if ($entry['role'] === 'user') {
+                // Preprocess user messages in conversation history too
+                $processed_content = $this->preprocess_user_message($entry['content']);
+                $messages[] = array(
+                    'role' => $entry['role'],
+                    'content' => $processed_content
+                );
+            } else {
+                $messages[] = array(
+                    'role' => $entry['role'],
+                    'content' => $entry['content']
+                );
+            }
         }
         
-        // Add the current user message
+        // Add the current user message (already processed)
         $messages[] = array(
             'role' => 'user',
-            'content' => $message
+            'content' => $processed_message
         );
         
         $body = array(
